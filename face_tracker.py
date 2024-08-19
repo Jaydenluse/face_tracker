@@ -2,9 +2,10 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import colorsys
+import math
 
 # Customizable variables
-FADE_SPEED = 1.01
+FADE_SPEED = .9
 LINE_COLOR = (255, 255, 255)  # White color for the body outline
 FACE_COLOR = (255, 255, 255)  # White color for face landmarks
 HAND_COLOR = (255, 255, 255)  # White color for hand landmarks
@@ -13,11 +14,15 @@ LINE_THICKNESS = 1
 GLOW_THICKNESS = 1
 BLUR_AMOUNT = 1
 EFFECT_OPACITY = 1
-OVERLAY_SPEED = 0.001
+OVERLAY_SPEED = 0.1
 OVERLAY_OPACITY = 0.1
 FACE_POINT_SIZE = 1
 HAND_POINT_SIZE = 2
 HEAD_OFFSET = 1.3  # Offset for duplicate heads (as a fraction of face width)
+ROTATION_SPEED = 5
+SCALE_SPEED = 0.01
+WAVE_AMPLITUDE = 5
+WAVE_FREQUENCY = 0.1
 
 # Initialize MediaPipe Solutions
 mp_pose = mp.solutions.pose
@@ -95,14 +100,38 @@ def draw_body_outline(canvas, landmarks):
 
     return canvas
 
-def draw_face_landmarks(canvas, face_landmarks, offset_x=0):
+def create_wave_effect(x, y, frame_count):
+    wave_x = x + WAVE_AMPLITUDE * math.sin(y * WAVE_FREQUENCY + frame_count * 0.1)
+    wave_y = y + WAVE_AMPLITUDE * math.cos(x * WAVE_FREQUENCY + frame_count * 0.1)
+    return int(wave_x), int(wave_y)
+
+def draw_face_landmarks(canvas, face_landmarks, offset_x=0, frame_count=0):
     h, w = canvas.shape[:2]
+    
+    # Create a mask for the face landmarks
+    mask = np.zeros((h, w), dtype=np.uint8)
+    
+    # Calculate the center of the face
+    face_x = np.mean([lm.x for lm in face_landmarks.landmark])
+    face_y = np.mean([lm.y for lm in face_landmarks.landmark])
+    center = (int((face_x + offset_x) * w), int(face_y * h))
+    
+    # Calculate rotation and scale
+    rotation = frame_count * ROTATION_SPEED
+    scale = 1 + 0.2 * math.sin(frame_count * SCALE_SPEED)
+    
+    # Create rotation matrix
+    M = cv2.getRotationMatrix2D(center, rotation, scale)
     
     # Draw all 468 face landmarks
     for landmark in face_landmarks.landmark:
         x, y = int((landmark.x + offset_x) * w), int(landmark.y * h)
-        if 0 <= x < w and 0 <= y < h:  # Ensure the point is within the canvas
-            cv2.circle(canvas, (x, y), FACE_POINT_SIZE, FACE_COLOR, -1)
+        
+        # Apply wave effect
+        x, y = create_wave_effect(x, y, frame_count)
+        
+        if 0 <= x < w and 0 <= y < h:
+            cv2.circle(mask, (x, y), FACE_POINT_SIZE, 255, -1)
     
     # Draw connections between landmarks
     connections = mp_face_mesh.FACEMESH_TESSELATION
@@ -116,9 +145,25 @@ def draw_face_landmarks(canvas, face_landmarks, offset_x=0):
         start_x, start_y = int((start_point.x + offset_x) * w), int(start_point.y * h)
         end_x, end_y = int((end_point.x + offset_x) * w), int(end_point.y * h)
         
+        # Apply wave effect
+        start_x, start_y = create_wave_effect(start_x, start_y, frame_count)
+        end_x, end_y = create_wave_effect(end_x, end_y, frame_count)
+        
         if (0 <= start_x < w and 0 <= start_y < h and
             0 <= end_x < w and 0 <= end_y < h):
-            cv2.line(canvas, (start_x, start_y), (end_x, end_y), FACE_COLOR, 1)
+            cv2.line(mask, (start_x, start_y), (end_x, end_y), 255, 1)
+    
+    # Apply rotation and scaling
+    transformed_mask = cv2.warpAffine(mask, M, (w, h))
+    
+    # Apply color to the mask
+    colored_mask = cv2.cvtColor(transformed_mask, cv2.COLOR_GRAY2BGR)
+    hue = (frame_count * OVERLAY_SPEED) % 1.0
+    rgb = tuple(int(x * 255) for x in colorsys.hsv_to_rgb(hue, 1.0, 1.0))
+    colored_mask[transformed_mask != 0] = rgb
+    
+    # Blend the colored mask with the canvas
+    canvas = cv2.addWeighted(canvas, 1, colored_mask, 0.7, 0)
     
     return canvas
 
@@ -172,19 +217,11 @@ while cap.isOpened():
             face_width = get_face_width(face_landmarks)
             offset = face_width * HEAD_OFFSET
 
-            art_canvas = draw_face_landmarks(art_canvas, face_landmarks, -offset * 2)
-            
-            # Draw left duplicate head
-            art_canvas = draw_face_landmarks(art_canvas, face_landmarks, -offset)
-            
-            # Draw original head
-            art_canvas = draw_face_landmarks(art_canvas, face_landmarks)
-            
-            # Draw right duplicate head
-            art_canvas = draw_face_landmarks(art_canvas, face_landmarks, offset)
 
-            # Draw right duplicate head
-            art_canvas = draw_face_landmarks(art_canvas, face_landmarks, offset * 2)
+            art_canvas = draw_face_landmarks(art_canvas, face_landmarks, -offset, frame_count)
+            art_canvas = draw_face_landmarks(art_canvas, face_landmarks, 0, frame_count)
+            art_canvas = draw_face_landmarks(art_canvas, face_landmarks, offset, frame_count)
+
 
     if hand_results.multi_hand_landmarks:
         for hand_landmarks in hand_results.multi_hand_landmarks:
