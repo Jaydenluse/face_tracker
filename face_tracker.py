@@ -11,11 +11,11 @@ HAND_COLOR = (255, 255, 255)  # White color for hand landmarks
 GLOW_COLOR = (255, 255, 255)  # Color of the glow effect
 LINE_THICKNESS = 1
 GLOW_THICKNESS = 1
-BLUR_AMOUNT = 1
+BLUR_AMOUNT = 51
 EFFECT_OPACITY = 1
-OVERLAY_SPEED = 0.001
+OVERLAY_SPEED = 0.9
 OVERLAY_OPACITY = 0.1
-FACE_POINT_SIZE = 1
+FACE_POINT_SIZE = 10
 HAND_POINT_SIZE = 2
 HEAD_OFFSET = 1.3  # Offset for duplicate heads (as a fraction of face width)
 
@@ -119,6 +119,11 @@ def draw_face_landmarks(canvas, face_landmarks, offset_x=0):
         if (0 <= start_x < w and 0 <= start_y < h and
             0 <= end_x < w and 0 <= end_y < h):
             cv2.line(canvas, (start_x, start_y), (end_x, end_y), FACE_COLOR, 1)
+
+    blurred = cv2.erode(canvas, (BLUR_AMOUNT, BLUR_AMOUNT), iterations = 5)
+
+    canvas = cv2.addWeighted(canvas, 0.4, blurred, 0.6, 0)
+
     
     return canvas
 
@@ -137,6 +142,7 @@ def draw_hand_landmarks(canvas, hand_landmarks):
         mp_drawing.DrawingSpec(color=HAND_COLOR, thickness=1)
     )
     return canvas
+
 
 def generate_color_overlay(frame_count):
     hue = (frame_count * OVERLAY_SPEED) % 1.0
